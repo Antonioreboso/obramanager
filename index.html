@@ -169,7 +169,7 @@
             try {
                 await setDoc(REF, { data: JSON.stringify(toSave), updatedAt: new Date().toISOString() });
                 window._lastFBSave = new Date().toISOString();
-                window._fbMinInterval = 2000; // reset backoff on success
+                window._fbMinInterval = 2000; // FIX: guardado más frecuente
                 setSyncBadge('synced');
             } catch(e) {
                 setSyncBadge('error');
@@ -200,7 +200,7 @@
                 if (!s.exists()) return;
                 // Ignore snapshots triggered by our own writes (within 3s grace period)
                 if (window._fbWritePending) return;
-                if (Date.now() - window._fbLastWrite < 500) return;
+                if (Date.now() - window._fbLastWrite < 1000) return;
                 try {
                     const rt = s.data().updatedAt || '';
                     if (rt > (window._lastFBSave || '')) {
@@ -6308,8 +6308,7 @@
         
         // ==================== INICIALIZACIÓN ====================
         // Startup lock: block Firebase writes for 12s to prevent resource-exhausted on load
-        window._fbStartupLock = true;
-        setTimeout(() => { window._fbStartupLock = false; }, 2000);
+        window._fbStartupLock = false; // FIX: sin bloqueo de inicio
         // Watchdog: si _fbWritePending se queda atascado más de 15s, lo reseteamos
         setInterval(() => {
             if (window._fbWritePending && window._fbLastWriteStart && (Date.now() - window._fbLastWriteStart) > 15000) {
@@ -10986,12 +10985,11 @@
                     }
                 });
             } catch(e) { console.error('saveData error:', e); }
+            // FIX: guardar en localStorage inmediatamente, Firebase en segundo plano
             clearTimeout(_saveTimer);
             _saveTimer = setTimeout(() => {
-                const b = document.getElementById('sync-status-badge');
-                if (b) { b.className='flex items-center gap-1 text-xs text-blue-400 mt-1'; b.innerHTML='<i class="fas fa-cloud-arrow-up"></i><span class="hidden sm:inline"> Guardando...</span>'; }
                 if (window.saveToFirebase) { window._appDataRef = appData; window.saveToFirebase(appData); }
-            }, 2000);
+            }, 3000);
         }
 
 
@@ -11122,11 +11120,9 @@
             // LOCAL always wins for dailyRecords — never let Firebase overwrite what was just saved
             // Merge: keep all local records; remote only adds records not present locally
             // Note: also protects when local is {} after a restore (remote should not win)
-            const localDailyIsNewer = localLastSync >= (remote.lastSync || '');
-            if (localDailyIsNewer || Object.keys(localDaily).length > 0) {
-                appData.dailyRecords = Object.assign({}, remote.dailyRecords || {}, localDaily);
-            }
-            // Restore local lastSync if it's newer
+            // FIX: mezclar dailyRecords de ambos lados para no perder ninguno
+            appData.dailyRecords = Object.assign({}, remote.dailyRecords || {}, localDaily);
+            // lastSync: el más reciente gana
             if (localLastSync > (remote.lastSync || '')) appData.lastSync = localLastSync;
             // LOCAL wins for paymentPlans — always managed locally, never overwritten by Firebase
             if (localPaymentPlans.length > 0) appData.paymentPlans = localPaymentPlans;
@@ -11192,9 +11188,8 @@
 
                 const remote = await window.loadFromFirebase?.();
                 if (!remote) { if (window.saveToFirebase) window.saveToFirebase(appData); return; }
-                const rt = remote.lastSync || '2000-01-01';
-                const lt = appData.lastSync || '2000-01-01';
-                if (rt > lt) {
+                // FIX: Firebase siempre gana al cargar — es la fuente de verdad compartida
+                if (true) {
                     _mergeRemoteData(remote);
                     _loadPersonasLocal(); // personas are local-only
                     saveData();
